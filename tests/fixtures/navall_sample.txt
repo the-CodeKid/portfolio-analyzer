@@ -1,0 +1,47 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+ 
+Open Ended Schemes(Equity Scheme - Large Cap Fund)
+ 
+Aditya Birla Sun Life Mutual Fund
+ 
+119528;INF209K01YY7;-;Aditya Birla Sun Life Large Cap Fund - Growth - Direct Plan;593.79;03-Aug-2026
+119527;INF209K01YX9;INF209K01YW1;Aditya Birla Sun Life Large Cap Fund-DIRECT - IDCW;95.50;03-Aug-2026
+103174;INF209K01BR9;-;Aditya Birla Sun Life Large Cap Fund-Growth;533.66;03-Aug-2026
+103173;INF209K01BO6;INF209K01EC5;Aditya Birla Sun Life Large Cap Fund-Regular - IDCW;39.72;03-Aug-2026
+
+Open Ended Schemes(Debt Scheme - Banking and PSU Fund)
+ 
+Aditya Birla Sun Life Mutual Fund
+ 
+119551;INF209KA12Z1;INF209KA13Z9;Aditya Birla Sun Life Banking & PSU Debt Fund  - DIRECT - IDCW;106.8983;03-Aug-2026
+119552;INF209K01YM2;-;Aditya Birla Sun Life Banking & PSU Debt Fund  - DIRECT - MONTHLY IDCW;117.1984;03-Aug-2026
+119553;INF209K01YO8;-;Aditya Birla Sun Life Banking & PSU Debt Fund  - Direct - Quarterly IDCW;104.9303;03-Aug-2026
+108272;INF209K01LX6;INF209KA11Z3;Aditya Birla Sun Life Banking & PSU Debt Fund  - REGULAR - IDCW;149.6008;03-Aug-2026
+ 
+Axis Mutual Fund
+ 
+128952;INF846K01NF8;-;Axis Banking & PSU Debt Fund - Direct Plan - Bonus Option;1532.8272;14-Jun-2017
+120437;-;INF846K01CU0;Axis Banking & PSU Debt Fund - Direct Plan - Daily IDCW;1039.1310;03-Aug-2026
+120438;INF846K01CR6;-;Axis Banking & PSU Debt Fund - Direct Plan - Growth Option;2892.5422;03-Aug-2026
+120439;INF846K01CT2;INF846K01CS4;Axis Banking & PSU Debt Fund - Direct Plan - Monthly IDCW;1033.8003;03-Aug-2026
+
+Open Ended Schemes(Exchange Traded Funds (ETFs) - Gold ETF)
+ 
+Invesco Mutual Fund
+ 
+112368;INF205KA1BP1;-;Invesco India Gold Exchange Traded Fund;123.2593;03-Aug-2026
+ 
+
+Open Ended Schemes(Income/Debt Oriented Schemes - Liquid Fund)
+ 
+Abakkus Mutual Fund
+ 
+154049;-;INF2JJD01011;Abakkus Liquid Fund - Direct Plan - Daily IDCW Reinvestment;100.0881;03-Aug-2026
+154051;INF2JJD01029;-;Abakkus Liquid Fund - Direct Plan - Growth;103.7953;03-Aug-2026
+
+Open Ended Schemes(Income)
+ 
+ICICI Prudential Mutual Fund
+ 
+103062;INF109K01EA1;INF109K01AQ5;ICICI Prudential Blended Plan B -  Dividend Option - I;15.0425;07-Oct-2016
+103061;INF109K01AR3;-;ICICI Prudential Blended Plan B -  Growth Option - I;23.9631;07-Oct-2016
