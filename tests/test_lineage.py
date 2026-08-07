@@ -159,3 +159,25 @@ def test_candidate_mergers_empty_when_nothing_died(db, navall_text, today):
     amfi.snapshot_scheme_master(db, snapshot, today)
     candidates = lineage.find_candidate_mergers(db, write_csv=False)
     assert candidates.empty
+
+
+def test_rejected_collisions_csv_names_the_funds(db, navall_text, today, tmp_path, monkeypatch):
+    """The CSV exists for a human to adjudicate — without fund names it is
+    just a list of opaque numbers."""
+    csv_path = tmp_path / "isin_collisions.csv"
+    monkeypatch.setattr(lineage, "ISIN_COLLISION_CSV_PATH", csv_path)
+
+    snapshot = amfi.parse_navall(navall_text)
+    twin = snapshot[snapshot["scheme_code"] == 119528].iloc[0].copy()
+    twin["scheme_code"] = 999900006
+    twin["plan"] = "Regular"  # forces plan_mismatch rejection
+    both = pd.concat([snapshot, pd.DataFrame([twin])], ignore_index=True)
+    amfi.snapshot_scheme_master(db, both, today)
+
+    lineage.stitch_isin_lineage(db, write_csv=True)
+
+    rejected = pd.read_csv(csv_path)
+    row = rejected[rejected["scheme_code_b"] == 999900006].iloc[0]
+    assert row["rejected_because"] == "plan_mismatch"
+    assert isinstance(row["name_a"], str) and row["name_a"].strip()
+    assert isinstance(row["name_b"], str) and row["name_b"].strip()

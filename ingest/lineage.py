@@ -81,6 +81,7 @@ def stitch_isin_lineage(con, write_csv: bool = True) -> pd.DataFrame:
         """
         SELECT m.scheme_code,
                any_value(m.isin)   AS isin,
+               any_value(m.name)   AS name,
                any_value(m.plan)   AS plan,
                any_value(m.option) AS option,
                min(m.first_seen)   AS first_seen,
