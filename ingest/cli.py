@@ -32,9 +32,12 @@ def snapshot(ctx: click.Context):
 @main.command()
 @click.option("--all-schemes", is_flag=True, help="Backfill every scheme, not just current Direct+Growth.")
 @click.option("--force", is_flag=True, help="Ignore cache, re-fetch from api.mfapi.in.")
-@click.option("--min-interval", default=0.34, show_default=True, help="Seconds between live API calls.")
+@click.option("--min-interval", default=0.12, show_default=True,
+              help="Minimum seconds between live API calls, globally across workers.")
+@click.option("--workers", default=6, show_default=True,
+              help="Parallel fetchers. Hides latency; does not raise the request rate.")
 @click.pass_context
-def backfill(ctx: click.Context, all_schemes: bool, force: bool, min_interval: float):
+def backfill(ctx: click.Context, all_schemes: bool, force: bool, min_interval: float, workers: int):
     """Backfill full NAV history from api.mfapi.in for currently-listed
     schemes (Direct+Growth by default, per REQUIREMENTS.md #3)."""
     con = connect(ctx.obj["db_path"])
@@ -50,8 +53,17 @@ def backfill(ctx: click.Context, all_schemes: bool, force: bool, min_interval: f
                 """
             ).df()["scheme_code"].tolist()
         click.echo(f"backfilling {len(codes)} scheme(s)...")
-        stats = mfapi.backfill(con, codes, min_interval=min_interval, force=force)
+
+        def report(done, total, fetched, cached, failed):
+            click.echo(f"  {done}/{total} | fetched {fetched} cached {cached} failed {failed}")
+
+        stats = mfapi.backfill(
+            con, codes, min_interval=min_interval, force=force,
+            workers=workers, on_progress=report,
+        )
         click.echo({k: v for k, v in stats.items() if k != "failures"})
+        if stats["aborted"]:
+            click.echo("ABORTED: too many consecutive failures — API likely down. Re-run to resume.")
         if stats["failures"]:
             click.echo(f"{len(stats['failures'])} failures (first 5): {stats['failures'][:5]}")
     finally:
