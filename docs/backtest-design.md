@@ -185,17 +185,22 @@ that follows, so each gets tests before the next starts.
   skfolio worth the dependency, and it is worth it only once single-path
   results exist to compare against.
 
-- **Span: 2010 onwards.** Covers the 2013 taper tantrum, the 2018 IL&FS
-  credit crisis and the 2020 crash — enough regime variety for the
-  randomisation control to mean something. Pre-2010 is excluded because
-  survivorship is weakest there: funds AMFI purged entirely are invisible
-  to us, which would flatter early results.
+- **Span: 2013 onwards.** Originally set to 2010, revised after the
+  backfill landed. Direct plans launched Jan 2013, and the data is
+  unambiguous:
 
-  Note this interacts with Direct plans, which only exist from Jan 2013.
-  Before that the harness must either fall back to Regular-plan NAV
-  (understating returns by the TER gap) or start the equity sleeve later.
-  Decide when implementing; whichever is chosen must be stated in the
-  report, not buried.
+  | Direct+Growth schemes with NAV by | count |
+  |---|---|
+  | 2009-06-30 | 3 |
+  | 2011-06-30 | 5 |
+  | 2013-06-30 | 486 |
+  | 2015-06-30 | 762 |
+
+  A 2010 start would have produced a four-fund universe — a coincidence,
+  not a backtest. 2013 still spans the 2018 IL&FS credit crisis and the
+  2020 crash, so the randomisation control has regime variety to work with,
+  and it avoids splicing Regular-plan NAV (which understates returns by the
+  TER gap) onto the front of the series.
 
 ## Still open
 

@@ -1,0 +1,105 @@
+# Indian mutual fund capital gains tax regimes, keyed by date of SALE.
+#
+# ---------------------------------------------------------------------------
+# VERIFY THIS FILE BEFORE TRUSTING ANY BACKTEST NUMBER.
+#
+# These rates drive every after-tax result the harness reports, and a 2013+
+# backtest spans three separate regime changes. They are recorded here as
+# data rather than buried in Python precisely so they can be checked, and
+# corrected, without touching code. Confirm against the relevant Finance Act
+# or with a tax professional. This tool is not tax advice.
+# ---------------------------------------------------------------------------
+#
+# Regimes are matched by the LATEST `effective_from` that is <= the sale
+# date. Holding-period thresholds decide LTCG vs STCG; the exemption is a
+# per-financial-year allowance applied against total LTCG.
+
+equity:
+  # Equity-oriented funds (>=65% domestic equity). Holding > 12m = long term.
+  long_term_months: 12
+
+  regimes:
+    - effective_from: "1900-01-01"
+      note: >
+        Pre-Finance-Act-2018. Long-term equity gains were fully exempt;
+        section 112A did not exist yet. This covers 2013-2018, a third of
+        the backtest window, and treating it with modern rates would
+        materially overstate the tax drag of that era.
+      ltcg_rate: 0.00
+      ltcg_exemption: 0
+      stcg_rate: 0.15
+
+    - effective_from: "2018-04-01"
+      note: >
+        Finance Act 2018 introduced section 112A: 10% on long-term equity
+        gains above Rs 1L per FY, without indexation. Gains accrued up to
+        31-Jan-2018 were grandfathered (see grandfathering below).
+      ltcg_rate: 0.10
+      ltcg_exemption: 100000
+      stcg_rate: 0.15
+
+    - effective_from: "2024-07-23"
+      note: >
+        Finance (No. 2) Act 2024. LTCG 10% -> 12.5%, exemption 1L -> 1.25L,
+        STCG 15% -> 20%. Splits FY2024-25 in two, so sale date rather than
+        financial year decides which regime applies.
+      ltcg_rate: 0.125
+      ltcg_exemption: 125000
+      stcg_rate: 0.20
+
+  grandfathering:
+    # Section 112A: for units bought on or before this date and sold on or
+    # after the sell cutoff, cost is stepped up to the 31-Jan-2018 fair
+    # market value, capped at the actual sale value (so it cannot manufacture
+    # a loss). Requires a 31-Jan-2018 NAV per scheme; where that NAV is
+    # unavailable the harness must say so rather than silently skip the
+    # step-up, since skipping it overstates tax.
+    enabled: true
+    fmv_date: "2018-01-31"
+    applies_to_sales_from: "2018-04-01"
+
+debt:
+  # Debt funds. Pre-2023 units: long term after 36m. Units acquired on or
+  # after 2023-04-01 have no long-term benefit at all (section 50AA).
+  long_term_months: 36
+
+  acquisition_rules:
+    - acquired_from: "2023-04-01"
+      note: >
+        Section 50AA (Finance Act 2023). Specified mutual funds acquired on
+        or after this date are deemed short-term regardless of holding
+        period, and taxed at the investor's slab rate.
+      always_short_term: true
+
+  regimes:
+    - effective_from: "1900-01-01"
+      note: >
+        Long-term debt gains taxed at 20% with indexation benefit. The
+        harness needs the Cost Inflation Index to apply this; casparser
+        ships a current CII table.
+      ltcg_rate: 0.20
+      ltcg_exemption: 0
+      indexation: true
+      stcg_rate: null   # slab — see slab_rate below
+
+    - effective_from: "2024-07-23"
+      note: >
+        Indexation withdrawn for debt; long-term gains on pre-Apr-2023 units
+        taxed at 12.5% without indexation.
+      ltcg_rate: 0.125
+      ltcg_exemption: 0
+      indexation: false
+      stcg_rate: null
+
+# Marginal slab rate applied where the regime says "slab". This is
+# investor-specific, not a market constant — set it to your own marginal
+# rate. Default assumes the highest ordinary slab.
+slab_rate: 0.30
+
+# Health and education cess, applied on top of computed tax.
+cess_rate: 0.04
+
+# Surcharge is income-dependent and deliberately not modelled. For a
+# single-user tool this understates tax for high incomes; set cess_rate
+# higher as a crude proxy if that matters to you.
+surcharge_rate: 0.0
