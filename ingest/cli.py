@@ -101,11 +101,16 @@ def benchmarks(ctx: click.Context, force: bool, stale_after: int):
 @main.command()
 @click.pass_context
 def all(ctx: click.Context):
-    """Run snapshot -> benchmarks -> stitch-lineage -> backfill, in that order."""
+    """Run snapshot -> benchmarks -> backfill -> stitch-lineage.
+
+    Lineage runs last on purpose: it will not stitch two scheme_codes
+    without a lifespan long enough to prove they didn't coexist, and that
+    evidence only exists once backfill has loaded real NAV history.
+    """
     ctx.invoke(snapshot)
     ctx.invoke(benchmarks)
-    ctx.invoke(stitch_lineage)
     ctx.invoke(backfill)
+    ctx.invoke(stitch_lineage)
 
 
 if __name__ == "__main__":
