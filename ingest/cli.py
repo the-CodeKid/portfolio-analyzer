@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import click
 
-from ingest import amfi, lineage, mfapi
+from ingest import amfi, benchmark, lineage, mfapi
 from ingest.db import DEFAULT_DB_PATH, connect
 
 
@@ -76,10 +76,34 @@ def stitch_lineage(ctx: click.Context, gap_days: int, min_similarity: float):
 
 
 @main.command()
+@click.option("--force", is_flag=True, help="Ignore cache, re-fetch index data.")
+@click.option("--stale-after", default=14, show_default=True,
+              help="Warn if an index's latest TRI point is older than this many days.")
+@click.pass_context
+def benchmarks(ctx: click.Context, force: bool, stale_after: int):
+    """Load benchmark TRI (Total Return Index) for every mapped category."""
+    con = connect(ctx.obj["db_path"])
+    try:
+        stats = benchmark.ingest(con, force=force)
+        click.echo(
+            f"indices: {stats['requested']} | fetched {stats['fetched']} "
+            f"| cached {stats['cached']} | rows {stats['rows_upserted']}"
+        )
+        for name, days in sorted(stats["staleness_days"].items()):
+            if days > stale_after:
+                click.echo(f"  STALE: {name} latest TRI point is {days}d old")
+        if stats["failures"]:
+            click.echo(f"{len(stats['failures'])} failure(s): {stats['failures'][:3]}")
+    finally:
+        con.close()
+
+
+@main.command()
 @click.pass_context
 def all(ctx: click.Context):
-    """Run snapshot -> stitch-lineage -> backfill, in that order."""
+    """Run snapshot -> benchmarks -> stitch-lineage -> backfill, in that order."""
     ctx.invoke(snapshot)
+    ctx.invoke(benchmarks)
     ctx.invoke(stitch_lineage)
     ctx.invoke(backfill)
 

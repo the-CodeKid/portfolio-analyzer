@@ -5,6 +5,20 @@ import pandas as pd
 from ingest import amfi, lineage
 
 
+def _give_nav_history(db, scheme_code: int, start: datetime.date, end: datetime.date) -> None:
+    """Real NAV span — lineage refuses to stitch without one (see has_span)."""
+    rows = pd.DataFrame(
+        {
+            "scheme_code": scheme_code,
+            "date": pd.date_range(start, end, freq="7D").date,
+            "nav": 100.0,
+        }
+    )
+    db.register("hist", rows)
+    db.execute("INSERT INTO nav SELECT scheme_code, date, nav FROM hist ON CONFLICT DO NOTHING")
+    db.unregister("hist")
+
+
 def test_isin_lineage_links_reissued_scheme_code(db, navall_text, today):
     snapshot = amfi.parse_navall(navall_text)
     amfi.snapshot_scheme_master(db, snapshot, today)
@@ -19,10 +33,71 @@ def test_isin_lineage_links_reissued_scheme_code(db, navall_text, today):
     day3 = pd.concat([day2, pd.DataFrame([reissue])], ignore_index=True)
     amfi.snapshot_scheme_master(db, day3, reissue_date)
 
-    lin = lineage.stitch_isin_lineage(db)
+    # old code lived and died; new code picked up afterwards — no overlap
+    _give_nav_history(db, 119528, today - datetime.timedelta(days=365), today)
+    _give_nav_history(db, 999900001, reissue_date, reissue_date + datetime.timedelta(days=365))
+
+    lin = lineage.stitch_isin_lineage(db, write_csv=False)
     old_cid = lin[lin["scheme_code"] == 119528]["canonical_id"].iloc[0]
     new_cid = lin[lin["scheme_code"] == 999900001]["canonical_id"].iloc[0]
     assert old_cid == new_cid
+
+
+def test_shared_isin_but_overlapping_lives_is_not_stitched(db, navall_text, today):
+    """AMFI ships duplicate ISINs across distinct concurrent schemes — those
+    are a data error, not lineage."""
+    snapshot = amfi.parse_navall(navall_text)
+    twin = snapshot[snapshot["scheme_code"] == 119528].iloc[0].copy()
+    twin["scheme_code"] = 999900003  # same ISIN, same plan/option, alive concurrently
+    both = pd.concat([snapshot, pd.DataFrame([twin])], ignore_index=True)
+    amfi.snapshot_scheme_master(db, both, today)
+
+    span_start = today - datetime.timedelta(days=365)
+    _give_nav_history(db, 119528, span_start, today)
+    _give_nav_history(db, 999900003, span_start, today)
+
+    lin = lineage.stitch_isin_lineage(db, write_csv=False)
+    assert (
+        lin[lin["scheme_code"] == 119528]["canonical_id"].iloc[0]
+        != lin[lin["scheme_code"] == 999900003]["canonical_id"].iloc[0]
+    )
+
+
+def test_shared_isin_across_different_plans_is_not_stitched(db, navall_text, today):
+    """Merging Direct into Regular would erase the TER difference."""
+    snapshot = amfi.parse_navall(navall_text)
+    regular_twin = snapshot[snapshot["scheme_code"] == 119528].iloc[0].copy()
+    regular_twin["scheme_code"] = 999900004
+    regular_twin["plan"] = "Regular"
+    both = pd.concat([snapshot, pd.DataFrame([regular_twin])], ignore_index=True)
+    amfi.snapshot_scheme_master(db, both, today)
+
+    _give_nav_history(db, 119528, today - datetime.timedelta(days=365), today)
+    _give_nav_history(db, 999900004, today + datetime.timedelta(days=30),
+                      today + datetime.timedelta(days=395))
+
+    lin = lineage.stitch_isin_lineage(db, write_csv=False)
+    assert (
+        lin[lin["scheme_code"] == 119528]["canonical_id"].iloc[0]
+        != lin[lin["scheme_code"] == 999900004]["canonical_id"].iloc[0]
+    )
+
+
+def test_no_stitching_without_lifespan_evidence(db, navall_text, today):
+    """Two dead funds each known only from a frozen single NAV date must not
+    merge just because their two points happen not to coincide."""
+    snapshot = amfi.parse_navall(navall_text)
+    twin = snapshot[snapshot["scheme_code"] == 119528].iloc[0].copy()
+    twin["scheme_code"] = 999900005
+    both = pd.concat([snapshot, pd.DataFrame([twin])], ignore_index=True)
+    amfi.snapshot_scheme_master(db, both, today)
+    amfi.upsert_nav(db, both)  # one NAV point each — no real span
+
+    lin = lineage.stitch_isin_lineage(db, write_csv=False)
+    assert (
+        lin[lin["scheme_code"] == 119528]["canonical_id"].iloc[0]
+        != lin[lin["scheme_code"] == 999900005]["canonical_id"].iloc[0]
+    )
 
 
 def test_isin_lineage_gives_every_scheme_a_canonical_id(db, navall_text, today):

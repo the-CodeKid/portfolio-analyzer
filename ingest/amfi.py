@@ -35,6 +35,21 @@ _SECTION_RE = re.compile(
     r"^(Open Ended Schemes|Close Ended Schemes|Interval Fund Schemes)\((.*)\)$"
 )
 
+# Indian MF ISINs are INF + 9 alphanumerics. AMFI's dump also carries "-" for
+# "not applicable" plus occasional free-text sentinels ("Redeemed"), stray
+# trailing spaces, and internal codes ("HDFCNIVODG"). Anything not matching
+# the real shape is dropped to NULL rather than stored, because downstream
+# lineage stitching joins on this column -- a sentinel like "Redeemed" shared
+# by 9 unrelated schemes would otherwise merge them into one fund.
+_ISIN_RE = re.compile(r"^INF[A-Z0-9]{9}$")
+
+
+def clean_isin(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    candidate = raw.strip().upper()
+    return candidate if _ISIN_RE.match(candidate) else None
+
 
 def fetch_navall(timeout: int = 30) -> str:
     resp = requests.get(NAVALL_URL, headers=_HEADERS, timeout=timeout)
@@ -109,8 +124,8 @@ def parse_navall(text: str) -> pd.DataFrame:
         rows.append(
             {
                 "scheme_code": scheme_code,
-                "isin": None if isin_growth == "-" else isin_growth,
-                "isin_reinvestment": None if isin_reinvest == "-" else isin_reinvest,
+                "isin": clean_isin(isin_growth),
+                "isin_reinvestment": clean_isin(isin_reinvest),
                 "name": name.strip(),
                 "amc": amc,
                 "scheme_type": scheme_type,
@@ -145,51 +160,84 @@ _MASTER_ATTR_COLS = [
 ]
 
 
-def snapshot_scheme_master(con, snapshot: pd.DataFrame, run_date: date_cls) -> dict:
+def snapshot_scheme_master(
+    con,
+    snapshot: pd.DataFrame,
+    run_date: date_cls,
+    resurrection_gap_days: int = 7,
+) -> dict:
     """SCD2 upsert of scheme_master from one day's parsed snapshot.
 
-    New scheme_codes, or ones whose attributes changed since the last known
-    row, get a fresh row (first_seen=last_seen=run_date). Scheme_codes whose
-    attributes are unchanged just have last_seen extended to run_date. Dead
-    scheme_codes (absent from `snapshot`) are left untouched — their last
-    known row's last_seen stays frozen, which is the survivorship signal.
-    Idempotent: re-running with the same snapshot/run_date is a no-op beyond
-    re-setting last_seen.
+    A scheme_code gets a NEW row when it is unseen, when its attributes
+    changed, or when it *resurrects* — i.e. it was absent from the previous
+    run and has now reappeared. Otherwise its existing row's last_seen is
+    extended forward. Dead scheme_codes (absent from `snapshot`) are left
+    untouched, their last_seen frozen: that is the survivorship signal.
+
+    Resurrection matters because extending last_seen straight across a gap
+    would erase the period the fund was delisted, and every "was this fund
+    alive at T?" query would then answer yes for months it was dead. It is
+    detected against the *previous run's* global max last_seen rather than
+    against wall-clock time, so an irregular ingest schedule (weekly, or a
+    month's outage) doesn't mass-flag every scheme as resurrected.
+    resurrection_gap_days tolerates AMFI publishing hiccups.
+
+    last_seen only ever moves forward. Re-running against a stale or cached
+    file must not rewind recorded history.
     """
     today = snapshot[["scheme_code", *_MASTER_ATTR_COLS]].copy()
-    con.register("today_master", today)
 
-    con.execute(
+    prev_global_last_seen = con.execute("SELECT max(last_seen) FROM scheme_master").fetchone()[0]
+
+    current = con.execute(
         """
-        CREATE OR REPLACE TEMP VIEW current_master AS
         SELECT * FROM scheme_master
         QUALIFY row_number() OVER (PARTITION BY scheme_code ORDER BY first_seen DESC) = 1
         """
-    )
-
-    match_expr = " AND ".join(f"t.{c} IS NOT DISTINCT FROM c.{c}" for c in _MASTER_ATTR_COLS)
-
-    to_insert = con.execute(
-        f"""
-        SELECT t.*
-        FROM today_master t
-        LEFT JOIN current_master c USING (scheme_code)
-        WHERE c.scheme_code IS NULL OR NOT ({match_expr})
-        """
     ).df()
 
-    n_extended = con.execute(
-        f"""
-        UPDATE scheme_master
-        SET last_seen = ?
-        FROM today_master t, current_master c
-        WHERE scheme_master.scheme_code = c.scheme_code
-          AND scheme_master.first_seen = c.first_seen
-          AND t.scheme_code = c.scheme_code
-          AND ({match_expr})
-        """,
-        [run_date],
-    ).fetchall()
+    merged = today.merge(current, on="scheme_code", how="left", suffixes=("", "_prev"))
+
+    if current.empty:
+        is_known = pd.Series(False, index=merged.index)
+        attrs_match = pd.Series(False, index=merged.index)
+        resurrected = pd.Series(False, index=merged.index)
+    else:
+        is_known = merged["first_seen"].notna()
+        attrs_match = pd.Series(True, index=merged.index)
+        for col in _MASTER_ATTR_COLS:
+            prev = merged[f"{col}_prev"]
+            attrs_match &= (merged[col] == prev) | (merged[col].isna() & prev.isna())
+
+        if prev_global_last_seen is None:
+            resurrected = pd.Series(False, index=merged.index)
+        else:
+            gap_cutoff = pd.Timestamp(prev_global_last_seen) - pd.Timedelta(
+                days=resurrection_gap_days
+            )
+            # absent at the previous run => its last_seen lags the run before this one
+            resurrected = is_known & (pd.to_datetime(merged["last_seen"]) < gap_cutoff)
+
+    needs_new_row = ~is_known | ~attrs_match | resurrected
+    to_insert = merged.loc[needs_new_row, ["scheme_code", *_MASTER_ATTR_COLS]].copy()
+    to_extend = merged.loc[~needs_new_row, ["scheme_code"]].copy()
+
+    if not to_extend.empty:
+        con.register("to_extend_master", to_extend)
+        con.execute(
+            """
+            UPDATE scheme_master
+            SET last_seen = greatest(last_seen, ?)
+            FROM to_extend_master e
+            WHERE scheme_master.scheme_code = e.scheme_code
+              AND scheme_master.first_seen = (
+                  SELECT max(first_seen) FROM scheme_master m2
+                  WHERE m2.scheme_code = scheme_master.scheme_code
+              )
+            """,
+            [run_date],
+        )
+        con.unregister("to_extend_master")
 
     if not to_insert.empty:
         to_insert["first_seen"] = run_date
@@ -204,9 +252,11 @@ def snapshot_scheme_master(con, snapshot: pd.DataFrame, run_date: date_cls) -> d
         )
         con.unregister("to_insert_master")
 
-    con.unregister("today_master")
-
-    return {"new_or_changed": len(to_insert), "extended": len(today) - len(to_insert)}
+    return {
+        "new_or_changed": int(len(to_insert)),
+        "extended": int(len(to_extend)),
+        "resurrected": int(resurrected.sum()),
+    }
 
 
 def upsert_nav(con, snapshot: pd.DataFrame) -> int:

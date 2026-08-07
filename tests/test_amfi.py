@@ -64,7 +64,7 @@ def test_duplicate_scheme_code_keeps_last(navall_text):
 def test_snapshot_scheme_master_first_run_inserts_all(db, navall_text, today):
     snapshot = amfi.parse_navall(navall_text)
     stats = amfi.snapshot_scheme_master(db, snapshot, today)
-    assert stats == {"new_or_changed": 17, "extended": 0}
+    assert stats == {"new_or_changed": 17, "extended": 0, "resurrected": 0}
     n = db.execute("SELECT count(*) FROM scheme_master").fetchone()[0]
     assert n == 17
 
@@ -73,7 +73,7 @@ def test_snapshot_scheme_master_rerun_is_idempotent(db, navall_text, today):
     snapshot = amfi.parse_navall(navall_text)
     amfi.snapshot_scheme_master(db, snapshot, today)
     stats = amfi.snapshot_scheme_master(db, snapshot, today)
-    assert stats == {"new_or_changed": 0, "extended": 17}
+    assert stats == {"new_or_changed": 0, "extended": 17, "resurrected": 0}
     n = db.execute("SELECT count(*) FROM scheme_master").fetchone()[0]
     assert n == 17  # no duplicate rows from re-running
 
@@ -86,7 +86,7 @@ def test_snapshot_scheme_master_attribute_change_versions_not_overwrites(db, nav
     day2.loc[day2["scheme_code"] == 119528, "name"] = "RENAMED FUND"
     day2_date = today + datetime.timedelta(days=1)
     stats = amfi.snapshot_scheme_master(db, day2, day2_date)
-    assert stats == {"new_or_changed": 1, "extended": 16}
+    assert stats == {"new_or_changed": 1, "extended": 16, "resurrected": 0}
 
     rows = db.execute(
         "SELECT name, first_seen, last_seen FROM scheme_master WHERE scheme_code = 119528 ORDER BY first_seen"
@@ -110,6 +110,55 @@ def test_snapshot_scheme_master_dead_scheme_keeps_frozen_last_seen(db, navall_te
         "SELECT first_seen, last_seen FROM scheme_master WHERE scheme_code = 119528"
     ).fetchone()
     assert row == (today, today)  # never touched again -> survivorship signal
+
+
+def test_resurrected_scheme_opens_new_row_not_a_bridged_span(db, navall_text, today):
+    """A fund that vanishes then returns must not have its dead period erased."""
+    snapshot = amfi.parse_navall(navall_text)
+    amfi.snapshot_scheme_master(db, snapshot, today)
+
+    # scheme 119528 absent at the next run
+    absent = snapshot[snapshot["scheme_code"] != 119528].copy()
+    amfi.snapshot_scheme_master(db, absent, today + datetime.timedelta(days=30))
+
+    # ...then returns, unchanged, months later
+    return_date = today + datetime.timedelta(days=165)
+    stats = amfi.snapshot_scheme_master(db, snapshot, return_date)
+    assert stats["resurrected"] == 1
+
+    rows = db.execute(
+        "SELECT first_seen, last_seen FROM scheme_master WHERE scheme_code = 119528 ORDER BY first_seen"
+    ).df()
+    assert len(rows) == 2, "resurrection must open a second row, not extend the first"
+    assert rows.iloc[0]["last_seen"].date() == today  # dead period preserved
+    assert rows.iloc[1]["first_seen"].date() == return_date
+
+
+def test_last_seen_never_moves_backwards_on_stale_input(db, navall_text, today):
+    """Re-running against a cached/stale file must not rewind history."""
+    snapshot = amfi.parse_navall(navall_text)
+    amfi.snapshot_scheme_master(db, snapshot, today)
+
+    forward = today + datetime.timedelta(days=20)
+    amfi.snapshot_scheme_master(db, snapshot, forward)
+
+    amfi.snapshot_scheme_master(db, snapshot, today)  # stale re-run
+
+    max_last_seen = db.execute("SELECT max(last_seen) FROM scheme_master").fetchone()[0]
+    assert max_last_seen == forward
+
+
+def test_junk_isins_are_dropped_not_stored(navall_text):
+    df = amfi.parse_navall(
+        navall_text
+        + "\r\n999001;Redeemed;Redeemed;Junk ISIN Fund - Direct Plan - Growth;10.0;03-Aug-2026"
+        + "\r\n999002;INF178L01BT0 ;HDFCNIVODG;Messy ISIN Fund - Direct Plan - Growth;10.0;03-Aug-2026\r\n"
+    ).set_index("scheme_code")
+
+    assert df.loc[999001, "isin"] is None
+    assert df.loc[999001, "isin_reinvestment"] is None
+    assert df.loc[999002, "isin"] == "INF178L01BT0"  # trailing space stripped
+    assert df.loc[999002, "isin_reinvestment"] is None  # internal code rejected
 
 
 def test_upsert_nav_idempotent_and_updates_on_conflict(db, navall_text):
